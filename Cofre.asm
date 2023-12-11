@@ -1,1200 +1,408 @@
-#define IO0 	0x0000
-#define IO1 	0x0200
-#define IO2 	0x0400
-#define IO3 	0x0600
-#define IO4 	0x0800
-#define IO5 	0x0A00
-#define IO6 	0x0C00
-#define IO7 	0x0E00
-#define IO8 	0x1000
-#define IO9 	0x1200
-#define IO10 	0x1400
-#define IO11 	0x1600
-#define IO12 	0x1800
-#define IO13 	0x1A00
-#define IO14 	0x1C00
-#define IO15 	0x1E00
+CREATE TABLE Combustivel (
+	cd_combustivel INTEGER,
+	ds_combustivel varchar(30)
+);
 
-// 8251A USART 
+ALTER TABLE Combustivel 
+ADD CONSTRAINT combustivel_pk PRIMARY KEY (cd_combustivel); 
 
-#define ADR_USART_DATA   (IO7 + 00h)
-//ONDE VOCE VAI MANDAR E RECEBER DADOS DO 8251
+CREATE TABLE Veiculo_Combustivel (
+	cd_combustivel INTEGER,
+	nr_placa char(7)
+);
 
-#define ADR_USART_CMD   (IO7 + 02h)
-//É O LOCAL ONDE VOCE VAI ESCREVER PARA PROGRAMAR O 8251
-//WRITE 0E02H
+ALTER TABLE Veiculo_Combustivel
+ADD CONSTRAINT veiculo_combustivel_pk PRIMARY KEY (cd_combustivel, nr_placa); 
 
-#define ADR_USART_STAT  (IO7 + 02h)
-//RETORNA O STATUS SE UM CARACTER FOI DIGITADO NO TERMINAL
-//RETORNA O STATUS SE POSSO TRANSMITIR CARACTER PARA O TERMINAL
-//READ 0E02H 
-
-unsigned char TABELA_TECLADO[] = {
-'7','8','9','/',
-'4','5','6','*',
-'1','2','3','-',
-'C','0','=','+'};
-
-unsigned char TABELA_7_SEG[] = {
-0b00111111, // 0
-0b00000110, // 1
-0b01011011, // 2
-0b01001111, // 3
-0b01100110, // 4
-0b01101101, // 5
-0b01111101, // 6
-0b00000111, // 7
-0b01111111, // 8
-0b01101111, // 9
-0b01110111, // A
-0b01111100, // B
-0b00111001, // C
-0b01011110, // D
-0b01111001, // E
-0b01110001  // F
-};
-
-unsigned char RESPONSE_7_SEG[] = {
-0b00111000, //L
-0b00111110, //U
-0b01111001, //E
-0b01110001, //F
-};
-
-unsigned char ANIMATION_7_SEG[] = {
-0b00000001,
-0b00000010,
-0b00000100,
-0b00001000,
-0b00010000,
-0b00100000
-};
-
-void Print_MM(int MM);
-void Print_SS(int SSS);
-void Print_HH(int HH);
-void Print_String(void);
-void Print_MM_SS(void);
-
-int MINUTOS = 0;
-int SEGUNDOS = 0;
-int HORAS = 0;
-
-int GARBAGE_COLLECTOR;
-
-char Tecla;
-
-char ZERO[] =  "ZERO";
-char UM[] =    "UM";
-char DOIS[] =  "DOIS";
-char TRES[] =  "TRES";
-char QUATRO[]= "QUATRO";
-char CINCO[] = "CINCO";
-char SEIS[] =  "SEIS";
-char SETE[] =  "SETE";
-char OITO[] =  "OITO";
-char NOVE[] =  "NOVE";
-
-unsigned char Tab_Mens1[] = "Entre com a Tabuada de";
-unsigned char Tab_Mens2[] = "A tabuada de ";
-unsigned char Tab_Mens3[] = " * ";
-unsigned char Tab_Mens4[] = " = ";
-
-unsigned char Terminal_Mens[] = "Entre com uma senha de 4 digitos no teclado 4x4";
-unsigned char Terminal_Mens2[] = "CHAME O TECNICO DO FABRICANTE DO COFRE PARA A LIBERAÇAO DO COFRE";
-
-int erroCount = 0;
-int locked = 0;
-int reset = 0;
-
-#define TAM_STRING 64
-
-char Mensagem[TAM_STRING+1];
-
-void MANDA_CARACTER(void);
-void ATUALIZA_HORAS_MINUTOS(void);
-
-void Le_Tecla(void);
-void Print_MM(int MM);
-void Print_SS(int SSS);
-void RECEBER_CARACTER_INTERRUPT(void);
-void PRINT_MM_SS(void);
-
-void INICIALIZA_8259(void) {
-   _asm {
-		pushf
-		push ax
-		push dx
-		mov dx, IO8 
-		mov al, 13H
-		out dx, al
-		mov dx, IO8 + 2 
-		mov al, 70h
-		out dx, al
-		mov al, 1bh
-		out dx, al
-		mov al, 00h
-		out dx, al
-		pop dx
-		pop ax
-		popf
-    }
-}
-
-void _interrupt _far nmi_handler(void) {			
-}
-
-void _interrupt _far int0_handler(void) {
-	asm call Print_MM_SS
-	asm call ATUALIZA_HORAS_MINUTOS
-}
-
-void _interrupt _far int1_handler(void) {
-	RECEBER_CARACTER_INTERRUPT();
-}
-
-void _interrupt _far int2_handler(void) {
-	Le_Tecla();
-}
-
-void _interrupt _far int3_handler(void){
-	asm mov al,'3'
-	asm call MANDA_CARACTER
-}
-
-void _interrupt _far int4_handler(void) {
-	asm mov al,'4'
-	asm call MANDA_CARACTER
-}
-
-void _interrupt _far int5_handler(void) {
-	asm mov al,'5'
-	asm call MANDA_CARACTER
-}
-
-void _interrupt _far int6_handler(void){
-	asm mov al,'6'
-	asm call MANDA_CARACTER
-}
-
-void _interrupt _far int7_handler(void) {
-	asm mov al,'7'
-	asm call MANDA_CARACTER
-}
-
-//ESTA ROTINA ALTERA O VETOR DE INTERRUPCAO INT_NO PARA QUE APONTE PARA SERVICE_PROC
-void set_int(unsigned char int_no, void * service_proc) { 
-	_asm { 
-		push es
-		xor ax, ax  //zera ax
-		mov es, ax  // manda ES aponta para SEGMENTO 0
-		mov al, int_no //pega no numero da interrupcao 2
-		xor ah, ah     //zera ah //ax 0000000000000010
-		shl ax, 1      //shift left rotaciona esquerda 0000000000000010													//0000000000000100                                               //0000000000001000       
-		shl ax, 1      //shift left rotaciona esquerda
-		mov si, ax  //manda si apontar para endereco 8
-		mov ax, service_proc //pega o endereco da tratadora
-		mov es:[si], ax //escreve na memoria a partir de 8 
-		inc si //
-		inc si //
-		mov bx, cs //segmento onde esta a tua rotina tratadora, seg 0 (Code Segmento)
-		mov es:[si], bx //escreve segmento
-		pop es  //gravamos entao em 8,9,10,11 o endereco do tratador e o segmento onde ele se encontra
-    }
-}
-
-//19200,8,N,1
-void INICIALIZA_8251(void) {
-	_asm {
-		MOV AL,0
-		MOV DX, ADR_USART_CMD
-		OUT DX,AL
-		OUT DX,AL
-		OUT DX,AL
-		MOV AL,40H
-		OUT DX,AL
-		MOV AL,4DH
-		OUT DX,AL
-		MOV AL,37H
-		OUT DX,AL
-    }
-}
-
-void MANDA_CARACTER(void) {
-	_asm {
-		PUSHF  ; SALVA FLAGS Z E C
-		PUSH DX
-		PUSH AX  ; SALVA AL   AX = AH/AL
-		
-BUSY:
-		MOV DX, ADR_USART_STAT
-		IN  AL,DX
-		TEST AL,1 ; 0000000S
-		JZ BUSY
-		MOV DX, ADR_USART_DATA
-		POP AX  ; RESTAURA AL
-		OUT DX,AL
-		POP DX
-		POPF ; RESTAURA FLAGS Z E C
-	}  
-}
-
-void RECEBER_CARACTER(void) {
-	_asm {
-		PUSHF
-		PUSH DX
-		
-AGUARDA_CARACTER:
-		MOV DX, ADR_USART_STAT
-		IN  AL,DX
-		TEST AL,2 ;000000S0
-		JZ AGUARDA_CARACTER
-		MOV DX, ADR_USART_DATA
-		IN AL,DX
-		SHR AL,1 
-		
-NAO_RECEBIDO:
-		POP DX
-		POPF
-   }
-}
-
-//AO TERMINO DESTA ROTINA, TEREMOS EM AL
-//O CODIGO ASCII DA TECLA DIGITADA
-
-char Tecla;
-char Ha_Tecla_Digitada = 0;
-
-void RECEBER_CARACTER_INTERRUPT(void) {
-	_asm {
-		PUSHF
-		PUSH DX
-		MOV DX, ADR_USART_DATA
-		IN AL,DX
-		mov Tecla,al
-		mov Ha_Tecla_Digitada,1
-		POP DX
-		POPF
-	}
-}
-
-char *NUMEROS[] = {"ZERO", "UM", "DOIS"};
-
-int KeyPressed = 0;
-
-void Le_Tecla(void) {
-	asm {
+ALTER TABLE Veiculo_Combustivel
+	ADD FOREIGN KEY (cd_combustivel)
+	REFERENCES Combustivel (cd_combustivel),
+	ADD FOREIGN KEY (nr_placa)
+	REFERENCES Veiculo (nr_placa);
 	
-Aguarda_Tecla:
-		mov dx, IO6
-		in  al, dx
-		mov ah, al
-		and al, 0b10000000 //verica bit mais esquerda ligado
-		cmp al, 0b10000000
-		jne Aguarda_Tecla
-		mov KeyPressed, 1
-		mov al, ah
-		and al, 0b00001111
-		mov bl, al
-		mov bh, 0
-		mov al, TABELA_TECLADO[BX]
-		mov Tecla, al
-		
-Aguarda_DA_IR_BAIXO:
-		mov dx, IO6
-		in  al, dx
-		mov ah, al
-		and al, 0b10000000 //verica bit mais esquerda ligado
-		cmp al, 0b10000000
-		je Aguarda_DA_IR_BAIXO
-	}
-}
+CREATE TABLE Marca (
+	cd_marca INTEGER,
+	ds_marca varchar(30)
+);
 
-void ATUALIZA_HORAS_MINUTOS(void){
-	asm {
-		add SEGUNDOS, 1 // inc SEGUNDOS
-		cmp SEGUNDOS, 60
-		je  ZERAR_SEGUNDOS
-		jmp BREAK
-		
-ZERAR_SEGUNDOS:
-		mov SEGUNDOS, 0
-		add MINUTOS, 1
-		cmp MINUTOS, 60
-		je 	ZERAR_MINUTOS
-		jmp BREAK
-		
-ZERAR_MINUTOS:
-		mov MINUTOS, 0
-		add HORAS,1
-		cmp HORAS, 24
-		je  ZERA_HORAS
-		jmp BREAK
-		
-ZERA_HORAS:
-		mov HORAS,0
-		
-BREAK:
-	}
-}
+ALTER TABLE Marca
+ADD CONSTRAINT marca_pk PRIMARY KEY (cd_marca);
 
-void Pausa(void) {
-	asm {
-		mov dx, IO6
-		in al, dx
-		cmp al,0b00000001 //na entrada, detectei sinal high
-		je  ESPERA_IR_LOW
-		cmp al,0b00000000 //na entrada, detectei sinal low
-		je  ESPERA_IR_HIGH
-		
-ESPERA_IR_LOW:
-		in al, dx
-		cmp al, 0b00000000
-		je BREAK
-		jmp ESPERA_IR_LOW
-		
-ESPERA_IR_HIGH:
-	  in al, dx
-	  cmp al, 0b00000001
-	  je BREAK
-	  jmp ESPERA_IR_HIGH
-BREAK:
-	}
-}
+CREATE TABLE Veiculo (
+	nr_placa char(7),
+	cd_proprietario INTEGER,
+	cd_modelo INTEGER,
+	nr_ano_fab INTEGER,
+	nr_ano_mod INTEGER,
+	qt_km_rodado INTEGER,
+	qt_portas INTEGER,
+	ds_observacao varchar(100)
+);
 
-char Digito_1;
-char Digito_2;
+ALTER TABLE Veiculo
+ADD CONSTRAINT veiculo_pk PRIMARY KEY (nr_placa);
 
-char Mensagem_1[] = {"HELLO WORLD"};
+ALTER TABLE veiculo
+ADD COLUMN cd_cor INTEGER;
 
-void Pula_Linha(void) {
-	asm {
-		mov al, 13
-		call MANDA_CARACTER
-		mov al, 10
-		call MANDA_CARACTER
-	}
-}
+ALTER TABLE Veiculo
+	ADD FOREIGN KEY (cd_proprietario)
+	REFERENCES Proprietario (cd_proprietario),
+	ADD FOREIGN KEY (cd_modelo)
+	REFERENCES Modelo (cd_modelo),
+	ADD FOREIGN KEY (cd_cor)
+	REFERENCES Cor (cd_cor);
 
-void Print_String(void) {
-	asm {
+CREATE TABLE Localidade (
+	cd_localidade INTEGER,
+	nm_localidade varchar(50)
+);
+
+ALTER TABLE Localidade
+ADD CONSTRAINT localidade_pk PRIMARY KEY (cd_localidade);
+
+CREATE TABLE Modelo (
+	cd_modelo INTEGER,
+	cd_marca INTEGER,
+	ds_modelo varchar(50)
+);
+
+ALTER TABLE Modelo
+ADD CONSTRAINT modelo_pk PRIMARY KEY (cd_modelo);
+
+ALTER TABLE Modelo
+ADD CONSTRAINT modelo_marca_fk
+	FOREIGN KEY (cd_marca)
+	REFERENCES marca (cd_marca);
+
+CREATE TABLE Proprietario (
+	cd_proprietario INTEGER,
+	cd_localidade INTEGER,
+	nm_proprietario varchar(50),
+	ds_logradouro varchar(50),
+	ds_complemento varchar(50),
+	ds_bairro varchar(50),
+	nr_telefone varchar(15),
+	ds_email varchar(50),
+	sg_uf char(2)
+);
+
+ALTER TABLE Proprietario
+ADD CONSTRAINT proprietario_pk PRIMARY KEY (cd_proprietario);
+
+ALTER TABLE Proprietario
+ADD CONSTRAINT proprietario_localidade_fk -- nome da tabela e tabela referência
+	FOREIGN KEY (cd_localidade)
+	REFERENCES Localidade (cd_localidade);
 	
-PROCURA_NULL:
-		mov al, [bx] //coloca em al "H"
-		cmp al, 0 //null ?
-		je  BREAK
-		call MANDA_CARACTER
-		inc bx
-		jmp PROCURA_NULL
-		
-BREAK:
-	}
-}
+CREATE TABLE Cor (
+	cd_cor INTEGER,
+	ds_cor VARCHAR(30),
+	PRIMARY KEY (cd_cor) -- usa-se quando há mais de uma pk
+);
 
-unsigned char QNT_CARACTERES_DIGITADOS;
+CREATE TABLE Acessorio ( 
+	cd_acessorio INTEGER PRIMARY KEY, -- usa-se quando há apenas uma pk
+	ds_acessorio VARCHAR(50)
+);
 
-//bx deve apontar para a memoria que guardara o Texto
-void Le_String(void) {
-	asm {
-		mov QNT_CARACTERES_DIGITADOS,0
-		
-AGUARDA_CARACTER:	
-		call RECEBER_CARACTER
-		cmp  al, 13 //enter
-		je   PRESSIONOU_ENTER
-		cmp  al, 8  //backspace
-		je   PRESSIONOU_BACKSPACE		
-		cmp QNT_CARACTERES_DIGITADOS, TAM_STRING
-		je  AGUARDA_CARACTER
-		mov [bx], al
-		inc bx
-		mov  byte ptr [bx], 0 //null
-		inc QNT_CARACTERES_DIGITADOS
-		call MANDA_CARACTER
-		jmp AGUARDA_CARACTER
-		
-PRESSIONOU_ENTER:
-		CMP QNT_CARACTERES_DIGITADOS,0
-		JE AGUARDA_CARACTER
-		JMP SAIDA_Le_String
-		
-PRESSIONOU_BACKSPACE:
-		cmp QNT_CARACTERES_DIGITADOS,0
-		je  AGUARDA_CARACTER
-		dec bx
-		mov byte ptr[bx], 0
-		dec QNT_CARACTERES_DIGITADOS
-		mov al, 8 //opcional
-		call MANDA_CARACTER
-		jmp AGUARDA_CARACTER
-		
-SAIDA_Le_String:
-	}
-}
+CREATE TABLE Veiculo_Acessorio (
+	nr_placa CHAR(7),
+	cd_acessorio INTEGER,
+	PRIMARY KEY (nr_placa, cd_acessorio)
+);
 
-//bx deve apontar para a memoria que guardara o Texto
-void Le_Byte_Modo_I(void) {
-	asm {
-		mov QNT_CARACTERES_DIGITADOS,0
-		
-AGUARDA_CARACTER:	
-		call RECEBER_CARACTER
-		cmp  al, 13 //enter
-		je   PRESSIONOU_ENTER
-		cmp  al, 8  //backspace
-		je   PRESSIONOU_BACKSPACE		
-		cmp QNT_CARACTERES_DIGITADOS, 3
-		je  AGUARDA_CARACTER
-		cmp al, '0'
-		jl  AGUARDA_CARACTER
-		cmp al, '9'
-		jg  AGUARDA_CARACTER
-		mov [bx], al
-		inc bx
-		mov  byte ptr [bx], 0 //null
-		inc QNT_CARACTERES_DIGITADOS
-		call MANDA_CARACTER
-		jmp AGUARDA_CARACTER
-		
-PRESSIONOU_ENTER:
-		CMP QNT_CARACTERES_DIGITADOS,0
-		JE AGUARDA_CARACTER
-		CMP QNT_CARACTERES_DIGITADOS,3
-		JNE AGUARDA_CARACTER
-		JMP SAIDA_Le_String
-		
-PRESSIONOU_BACKSPACE:
-		cmp QNT_CARACTERES_DIGITADOS,0
-		je  AGUARDA_CARACTER
-		dec bx
-		mov byte ptr[bx], 0
-		dec QNT_CARACTERES_DIGITADOS
-		mov al, 8 //opcional
-		call MANDA_CARACTER
-		jmp AGUARDA_CARACTER
-		
-SAIDA_Le_String:
-		mov ch, Mensagem[0] // '1' 49
-		mov dh, Mensagem[1] // '2' 50
-		mov dl, Mensagem[2] // '3' 51
-		sub ch, '0' //1*100 
-		sub dh, '0' //2*10
-		sub dl, '0' //3*1
-		// mul cl <==== ax = al * cl
-		mov di, 0
-		mov cl, 100
-		mov al, ch
-		mul cl
-		add di, ax //soma parcial da multiplicacao
-		mov cl, 10
-		mov al, dh
-		mul cl
-		add di, ax
-		mov cl, 1
-		mov al, dl
-		mul cl
-		add di, ax //pronto, di = 1*100+2*10+3*1
-		cmp di, 255
-		jg AGUARDA_CARACTER 
-	}
-}
-
-unsigned char Temp[3+1];
-unsigned char Result;
-unsigned int  Reg_Di;
-
-void Verifica_Tempo_Real(void) {
-	asm {
-		CMP QNT_CARACTERES_DIGITADOS,1
-		JE  MULT_UNIDADE
-		CMP QNT_CARACTERES_DIGITADOS,2
-		JE  MULT_DEZ_UNID
-		CMP QNT_CARACTERES_DIGITADOS,3
-		JE  MULT_CENT_DEZ_UNID
-		
-MULT_UNIDADE:
-		mov di, 0
-		mov ch, Temp[0] // '1' 49
-		sub ch, '0' //ascii para int
-		mov al, ch
-		mov ah, 0
-		mov cl, 1		
-		mul cl
-		add di, ax //pronto, di = 1*100+2*10+3*1		
-		jmp SAI_ROTINA_TEMPO_REAL
-		
-MULT_DEZ_UNID:
-		mov ch, Temp[0] // '1' 49
-		mov dh, Temp[1] // '2' 50
-		sub ch, '0' //*10
-		sub dh, '0' //*1
-		// mul cl <==== ax = al * cl
-		mov di, 0
-		mov cl, 10
-		mov al, ch
-		mul cl
-		add di, ax //soma parcial da multiplicacao
-		mov cl, 1
-		mov al, dh
-		mul cl
-		add di, ax
-		jmp SAI_ROTINA_TEMPO_REAL
-
-MULT_CENT_DEZ_UNID:
-		mov ch, Temp[0] // '1' 49
-		mov dh, Temp[1] // '2' 50
-		mov dl, Temp[2] // '3' 51
-		sub ch, '0' //1*100 
-		sub dh, '0' //2*10
-		sub dl, '0' //3*1
-		// mul cl <==== ax = al * cl
-		mov di, 0
-		mov cl, 100
-		mov al, ch
-		mul cl
-		add di, ax //soma parcial da multiplicacao
-		mov cl, 10
-		mov al, dh
-		mul cl
-		add di, ax
-		mov cl, 1
-		mov al, dl
-		mul cl
-		add di, ax //pronto, di = 1*100+2*10+3*1
-		
-SAI_ROTINA_TEMPO_REAL:
-		mov Reg_Di,di
-	}
-}
-
-//bx deve apontar para a memoria que guardara o Texto
-void Le_Byte_Modo_II(void) {
-	asm {
-		mov bx, offset Temp
-		mov QNT_CARACTERES_DIGITADOS,0
-		
-AGUARDA_CARACTER:	
-		call RECEBER_CARACTER
-		cmp  al, 13 //enter
-		je   PRESSIONOU_ENTER
-		cmp  al, 8  //backspace
-		je   PRESSIONOU_BACKSPACE		
-		cmp QNT_CARACTERES_DIGITADOS, 3
-		je  AGUARDA_CARACTER
-		cmp al, '0'
-		jl  AGUARDA_CARACTER
-		cmp al, '9'
-		jg  AGUARDA_CARACTER
-
-		mov [bx], al
-		inc bx
-		mov  byte ptr [bx], 0 //null
-		inc QNT_CARACTERES_DIGITADOS
-		call MANDA_CARACTER
-		JMP  VERIFICA_EM_TEMPO_REAL
-
-PRESSIONOU_ENTER:
-		CMP QNT_CARACTERES_DIGITADOS,0
-		JE AGUARDA_CARACTER
-		//CMP QNT_CARACTERES_DIGITADOS,3
-		//JNE AGUARDA_CARACTER
-		JMP SAIDA_Le_String
-		
-PRESSIONOU_BACKSPACE:
-		cmp QNT_CARACTERES_DIGITADOS,0
-		je  AGUARDA_CARACTER
-		dec bx
-		mov byte ptr[bx], 0
-		dec QNT_CARACTERES_DIGITADOS
-		mov al, 8 //opcional
-		call MANDA_CARACTER
-		jmp AGUARDA_CARACTER
-		
-VERIFICA_EM_TEMPO_REAL:
-		CALL Verifica_Tempo_Real
-		cmp Reg_Di, 255
-		jg APAGA_ULTIMO_CARACTER
-		JMP AGUARDA_CARACTER
-		
-APAGA_ULTIMO_CARACTER:
-		MOV AL,8
-		CALL MANDA_CARACTER
-		DEC BX
-		MOV BYTE PTR [BX], 0
-		DEC QNT_CARACTERES_DIGITADOS
-		JMP AGUARDA_CARACTER
-		
-SAIDA_Le_String:
-		CALL Verifica_Tempo_Real
-		push Reg_Di
-		pop  ax //al tem o resultado do numero digitado (int)
-		mov  Result, al
-	}
-}
-
-//mov al,254
-//call Print_Int
-//al deve conter o numero a ser impresso!
-
-unsigned Contador_Pilha;
-void Print_Int(void) {   
-
-Contador_Pilha = 0; // mov Contador_Pilha,0
+ALTER TABLE Veiculo_Acessorio
+	ADD FOREIGN KEY (nr_placa)
+	REFERENCES Veiculo (nr_placa),
+	ADD FOREIGN KEY (cd_acessorio)
+	REFERENCES Acessorio (cd_acessorio);	
 	
-	asm {
-	
-Decomposicao:
-		mov cl, 10
-		mov ah,0
-		div cl 
-		push ax //pois ax tem ah
-		inc Contador_Pilha
-		cmp al, 0
-		jne Decomposicao
+INSERT INTO Combustivel VALUES (1, 'Gasolina comum');
+INSERT INTO Combustivel VALUES (2, 'Gasolina aditivada');
+INSERT INTO Combustivel VALUES (3, 'Diesel');
+INSERT INTO Combustivel VALUES (4, 'Álcool');
+
+INSERT INTO Marca VALUES (1, 'Volkswagen');
+INSERT INTO Marca VALUES (2, 'Audi');
+INSERT INTO Marca VALUES (3, 'BMW');
+INSERT INTO Marca VALUES (4, 'Chevrolet');
+INSERT INTO Marca VALUES (5, 'Citroen');
+INSERT INTO Marca VALUES (6, 'Ferrari');
+INSERT INTO Marca VALUES (7, 'Fiat');
+INSERT INTO Marca VALUES (8, 'Ford');
+INSERT INTO Marca VALUES (9, 'Jeep');
+INSERT INTO Marca VALUES (10, 'Horda');
+
+INSERT INTO Modelo VALUES (1, 1, 'Jetta');
+INSERT INTO Modelo VALUES (2, 1, 'Polo');
+INSERT INTO Modelo VALUES (3, 2, 'Audi A3');
+INSERT INTO Modelo VALUES (4, 2, 'Audi Q5');
+INSERT INTO Modelo VALUES (5, 3, 'BMW X3');
+INSERT INTO Modelo VALUES (6, 3, 'BMW SÉRIE 5');
+INSERT INTO Modelo VALUES (7, 4, 'Camaro');
+INSERT INTO Modelo VALUES (8, 4, 'Onix');
+INSERT INTO Modelo VALUES (9, 5, 'Citroen C3');
+INSERT INTO Modelo VALUES (10, 5, 'Jumpy');
+INSERT INTO Modelo VALUES (11, 6, 'Ferrari Roma');
+INSERT INTO Modelo VALUES (12, 6, 'Ferrari SF90');
+INSERT INTO Modelo VALUES (13, 7, 'Argo');
+INSERT INTO Modelo VALUES (14, 7, 'Fiat 500');
+INSERT INTO Modelo VALUES (15, 8, 'Mustang');
+INSERT INTO Modelo VALUES (16, 8, 'Lincoln');
+INSERT INTO Modelo VALUES (17, 9, 'Renegade');
+INSERT INTO Modelo VALUES (18, 9, 'Commander');
+INSERT INTO Modelo VALUES (19, 5, 'Civic');
+INSERT INTO Modelo VALUES (20, 5, 'City');
+
+INSERT INTO Localidade VALUES (1, "Blumenau");
+INSERT INTO Localidade VALUES (2, "Rodeio");
+INSERT INTO Localidade VALUES (3, "Rio do Sul");
+INSERT INTO Localidade VALUES (4, "São Francisco");
+INSERT INTO Localidade VALUES (5, "Lages");
+INSERT INTO Localidade VALUES (6, "Joinville");
+INSERT INTO Localidade VALUES (7, "Rio dos Cedros");
+INSERT INTO Localidade VALUES (8, "Itapema");
+INSERT INTO Localidade VALUES (9, "São Bento");
+INSERT INTO Localidade VALUES (10, "Pomerode");
+
+INSERT INTO Cor VALUES (1, 'Preto');
+INSERT INTO Cor VALUES (2, 'Branco');
+INSERT INTO Cor VALUES (3, 'Prata');
+INSERT INTO Cor VALUES (4, 'Cinza');
+INSERT INTO Cor VALUES (5, 'Pérola');
+INSERT INTO Cor VALUES (6, 'Bege');
+INSERT INTO Cor VALUES (7, 'Azul');
+INSERT INTO Cor VALUES (8, 'Vermelho');
+INSERT INTO Cor VALUES (9, 'Cobre');
+INSERT INTO Cor VALUES (10, 'Verde');
+
+INSERT INTO Acessorio VALUES (1, 'Retrovisor automático');
+INSERT INTO Acessorio VALUES (2, 'Câmera de ré');
+INSERT INTO Acessorio VALUES (3, 'Airbag');
+INSERT INTO Acessorio VALUES (4, 'Ar condicionado');
+INSERT INTO Acessorio VALUES (5, 'Banco de couro');
+INSERT INTO Acessorio VALUES (6, 'Alarme');
+INSERT INTO Acessorio VALUES (7, 'GPS');
+INSERT INTO Acessorio VALUES (8, 'Tapetes');
+INSERT INTO Acessorio VALUES (9, 'Led colorido');
+INSERT INTO Acessorio VALUES (10, 'Freio ABS');
+
+INSERT INTO Veiculo VALUES ('ABC-123', 1, 1, 2017, 2007, 88.000, 4, '', 1);
+INSERT INTO Veiculo VALUES ('DEF-123', 2, 2, 2006, 2006, 98.000, 4, 'Sem descrição', 2);
+INSERT INTO Veiculo VALUES ('GHI-123', 3, 3, 2013, 2013, 130.000, 4, 'Sem descrição', 3);
+INSERT INTO Veiculo VALUES ('JKL-123', 4, 4, 2019, 2019, 60.000, 4, 'Sem descrição', 4);
+INSERT INTO Veiculo VALUES ('MNO-123', 5, 5, 2020, 2020, 75.000, 2, 'Sem descrição', 5);
+INSERT INTO Veiculo VALUES ('PQR-123', 6, 6, 2023, 2023, 0, 2, 'Sem descrição', 6);
+INSERT INTO Veiculo VALUES ('STU-123', 7, 7, 2009, 2009, 49.000, 4, 'Sem descrição', 7);
+INSERT INTO Veiculo VALUES ('VWX-123', 8, 8, 2003, 2003, 250.000, 4, 'Sem descrição', 8);
+INSERT INTO Veiculo VALUES ('YZA-123', 9, 9, 2010, 2010, 100.000, 4, 'Sem descrição', 9);
+INSERT INTO Veiculo VALUES ('BCD-456', 10, 10, 2005, 2005, 120.000, 4, 'Sem descrição', 10);
+INSERT INTO Veiculo VALUES ('EFG-456', 1, 11, 2022, 2022, 22.000, 2, 'Sem descrição', 1);
+INSERT INTO Veiculo VALUES ('HIJ-456', 2, 12, 2004, 2004, 10.000, 2, 'Sem descrição', 2);
+INSERT INTO Veiculo VALUES ('KLM-456', 3, 13, 2021, 2021, 223.000, 4, 'Sem descrição', 3);
+INSERT INTO Veiculo VALUES ('NOP-456', 4, 14, 2018, 2018, 102.000, 4, 'Sem descrição', 4);
+INSERT INTO Veiculo VALUES ('QRS-456', 5, 15, 2015, 2015, 136.000, 2, 'Sem descrição', 5);
+INSERT INTO Veiculo VALUES ('TUV-456', 6, 16, 2008, 2008, 260.000, 2, 'Sem descrição', 6);
+INSERT INTO Veiculo VALUES ('WXY-456', 7, 17, 2016, 2016, 190.000, 4, 'Sem descrição', 7);
+INSERT INTO Veiculo VALUES ('ZAB-456', 8, 18, 2005, 2005, 137.000, 4, 'Sem descrição', 8);
+INSERT INTO Veiculo VALUES ('CDE-789', 9, 19, 2008, 2008, 175.000, 4, 'Sem descrição', 9);
+INSERT INTO Veiculo VALUES ('FGH-789', 10, 20, 2023, 2023, 0, 4, '', 10);
+
+INSERT INTO Veiculo_Combustivel VALUES (1, 'ABC-123');
+INSERT INTO Veiculo_Combustivel VALUES (2, 'DEF-123');
+INSERT INTO Veiculo_Combustivel VALUES (3, 'GHI-123');
+INSERT INTO Veiculo_Combustivel VALUES (4, 'JKL-123');
+INSERT INTO Veiculo_Combustivel VALUES (1, 'MNO-123');
+INSERT INTO Veiculo_Combustivel VALUES (2, 'PQR-123');
+INSERT INTO Veiculo_Combustivel VALUES (3, 'STU-123');
+INSERT INTO Veiculo_Combustivel VALUES (4, 'VWX-123');
+INSERT INTO Veiculo_Combustivel VALUES (1, 'YZA-123');
+INSERT INTO Veiculo_Combustivel VALUES (2, 'BCD-456');
+INSERT INTO Veiculo_Combustivel VALUES (3, 'EFG-456');
+INSERT INTO Veiculo_Combustivel VALUES (4, 'HIJ-456');
+INSERT INTO Veiculo_Combustivel VALUES (1, 'KLM-456');
+INSERT INTO Veiculo_Combustivel VALUES (2, 'NOP-456');
+INSERT INTO Veiculo_Combustivel VALUES (3, 'QRS-456');
+INSERT INTO Veiculo_Combustivel VALUES (4, 'TUV-456');
+INSERT INTO Veiculo_Combustivel VALUES (1, 'WXY-456');
+INSERT INTO Veiculo_Combustivel VALUES (2, 'ZAB-456');
+INSERT INTO Veiculo_Combustivel VALUES (3, 'CDE-789');
+INSERT INTO Veiculo_Combustivel VALUES (4, 'FGH-789');
+
+INSERT INTO Proprietario VALUES (1, 1, 'Leticia', 'Rua Barão do Rio Branco', 'Casa', 'Centro', '(47) 99999-9999', 'leticia.com', 'SC');
+INSERT INTO Proprietario VALUES (2, 2, 'Ana Silva', 'Avenida Rio Branco', 'Apto', 'VK', '(47) 11111-9999', 'ana.com', 'SC');
+INSERT INTO Proprietario VALUES (3, 3, 'Clara', 'Rua 7 de Setembro', 'Ap', 'Itoupava', '(47) 99999-1111', 'Clara.com', 'SC');
+INSERT INTO Proprietario VALUES (4, 4, 'Alice', 'Rua XV', 'Casa', 'Apartamento', '(11) 12345-6789', 'alice.com', 'SC');
+INSERT INTO Proprietario VALUES (5, 5, 'Jéssica', 'Rua Presidente Kenedy', 'Loja', 'Garcia', '(47) 19999-9999', 'jessica.com', 'SC');
+INSERT INTO Proprietario VALUES (6, 6, 'Manuela', 'Alameda Rio Branco', 'Comércio', 'Diamante', '(15) 91111-1111', 'manuela.com', 'SC');
+INSERT INTO Proprietario VALUES (7, 7, 'Julia', 'Avenida Brasil', 'Casa', 'Centro', '(47) 11111-1111', null, 'SC');
+INSERT INTO Proprietario VALUES (8, 8, 'Daniela', 'Rua 1° de Janeiro', 'Escritório', 'Centro', '(85) 91111-9999', 'daniela.com', 'SC');
+INSERT INTO Proprietario VALUES (9, 9, 'Ivete', 'Rua Bahia', 'Apto', 'Água Verde', '(47) 56789-1234', 'ivete.com', 'SC');
+INSERT INTO Proprietario VALUES (10, 1, 'Brenda', 'Rua Doutor Blumenau', 'Casa', 'Rodeio 12', '(99) 99999-9999', null, 'SC');
+INSERT INTO Proprietario VALUES (11, 2, 'João', 'Rua Doutor Pedro Zimmerman', 'Ap', 'Nações', null, null, 'SC');
+INSERT INTO Proprietario VALUES (12, 3, 'Pedro', 'Avenida Floral', 'Casa', 'Imigrantes', '(54) 99999-9876', 'pedro.com', 'SC');
+INSERT INTO Proprietario VALUES (13, 4, 'Mateus', 'Alameda Sete', 'Casa', 'Pomeranos', '(47) 99999-6789', 'mateus.com', 'SC');
+INSERT INTO Proprietario VALUES (14, 5, 'Douglas', 'Alameda 20 de Outubro', 'Casa', 'Vila Nova', '(47) 12345-9999', 'douglas.com', 'SC');
+INSERT INTO Proprietario VALUES (15, 6, 'Lucas', 'Rua Carlos Moser', 'Apartamento', 'São Pedro Novo', '(48) 12589-9999', 'lucas.com', 'SC');
+INSERT INTO Proprietario VALUES (16, 7, 'Davi', 'Rua Belo Horizonte', 'Casa', 'Capitais', '(15) 11256-9999', 'davi.com', 'SC');
+INSERT INTO Proprietario VALUES (17, 8, 'Heitor', 'Avenida Floriano Peixoto', 'Casa', 'Estados', '(11) 13620-9999', 'heitor.com', 'SC');
+INSERT INTO Proprietario VALUES (18, 9, 'Marco', 'Rua das Palmeiras', 'Casa', 'Gávea', '(47) 99999-1235', 'marco.com', 'SC');
+INSERT INTO Proprietario VALUES (19, 10, 'Gabriel', 'Rua Barão do Rio Branco', 'Casa', 'Encano', '(18) 12785-9999', 'gabriel.com', 'SC');
+INSERT INTO Proprietario VALUES (20, 10, 'Kauã', 'Avenida das Américas', 'Casa', 'Glória', '(45) 36879-9546', 'kaua.com', 'SC');
+
+INSERT INTO Veiculo_Acessorio VALUES ('ABC-123', 1);
+INSERT INTO Veiculo_Acessorio VALUES ('DEF-123', 2);
+INSERT INTO Veiculo_Acessorio VALUES ('GHI-123', 3);
+INSERT INTO Veiculo_Acessorio VALUES ('JKL-123', 4);
+INSERT INTO Veiculo_Acessorio VALUES ('MNO-123', 5);
+INSERT INTO Veiculo_Acessorio VALUES ('PQR-123', 6);
+INSERT INTO Veiculo_Acessorio VALUES ('STU-123', 7);
+INSERT INTO Veiculo_Acessorio VALUES ('VWX-123', 8);
+INSERT INTO Veiculo_Acessorio VALUES ('YZA-123', 9);
+INSERT INTO Veiculo_Acessorio VALUES ('BCD-456', 10);
+INSERT INTO Veiculo_Acessorio VALUES ('EFG-456', 1);
+INSERT INTO Veiculo_Acessorio VALUES ('HIJ-456', 2);
+INSERT INTO Veiculo_Acessorio VALUES ('KLM-456', 3);
+INSERT INTO Veiculo_Acessorio VALUES ('NOP-456', 4);
+INSERT INTO Veiculo_Acessorio VALUES ('QRS-456', 5);
+INSERT INTO Veiculo_Acessorio VALUES ('TUV-456', 6);
+INSERT INTO Veiculo_Acessorio VALUES ('WXY-456', 7);
+INSERT INTO Veiculo_Acessorio VALUES ('ZAB-456', 8);
+INSERT INTO Veiculo_Acessorio VALUES ('CDE-789', 9);
+INSERT INTO Veiculo_Acessorio VALUES ('FGH-789', 10);
+
+
+-- a) Listar os nomes dos proprietários com a respectiva localidade (nome) em que residem;
+   -- SELECT p.nm_proprietario, l.nm_localidade
+   -- FROM Proprietario p, Localidade l
+   -- WHERE p.cd_localidade = l.cd_localidade
+
+   -- OU --
+
+SELECT p.nm_proprietario, l.nm_localidade
+FROM proprietario p JOIN localidade l ON (p.cd_localidade = l.cd_localidade)
+
+-- b) Listar todos os modelos da marca "FIAT" ordenados pelo descrição do modelo;
+SELECT mo.ds_modelo, ma.ds_marca
+FROM marca ma JOIN modelo mo ON (ma.cd_marca = mo.cd_marca)
+WHERE ma.ds_marca = 'FIAT'
+ORDER BY mo.ds_modelo
+
+-- c) Listar todas as marcas (descrição) disponíveis com o respetivo modelo (descrição), em ordem crescente de marca, seguida de modelo;
+SELECT ma.ds_marca AS marca, mo.ds_modelo AS modelo
+FROM Marca ma JOIN Modelo mo ON (ma.cd_marca = mo.cd_modelo)
+ORDER BY ma.ds_marca, mo.ds_modelo
+
+-- d) Listar a placa, o ano modelo e a descrição da cor de todos os veículos cadastrados, ordenando pelo ano modelo, seguido da descrição da cor;
+SELECT v.nr_placa, v.nr_ano_mod, c.ds_cor
+FROM Veiculo v, Cor c
+WHERE v.cd_cor = c.cd_cor
+ORDER BY v.nr_ano_mod, c.ds_cor
+
+-- e) Listar os seguintes dados do veículo: placa, nome do proprietário e nome da localidade que o mesmo reside, desde que sua UF seja "SC";
+SELECT v.nr_placa, p.nm_proprietario, l.nm_localidade, p.sg_uf
+FROM Veiculo v JOIN Proprietario p ON (v.cd_proprietario = p.cd_proprietario)
+					JOIN localidade l ON (p.cd_localidade = l.cd_localidade)
+WHERE sg_uf = 'SC'
+
+-- f)  Listar os dados dos veículos com placa, descrição da marca, descrição do modelo, ano do modelo e a(s) respectiva(s) descrição(ões) do(s) 
+--     combustível(is) que é movido;
+SELECT v.nr_placa, ma.ds_marca, mo.ds_modelo, v.nr_ano_mod, c.ds_combustivel
+FROM veiculo v JOIN Modelo mo ON (v.cd_modelo = mo.cd_modelo)
+ 					JOIN Marca ma ON (mo.cd_marca = ma.cd_marca)
+					JOIN veiculo_combustivel vc ON (v.nr_placa = vc.nr_placa)
+					JOIN combustivel c ON (vc.cd_combustivel = c.cd_combustivel)
+ORDER BY c.ds_combustivel
+
+-- g) Listar os veículos (com placa, descrição da marca, descrição do modelo) que possuem como acessório "Direção hidráulica";
+SELECT v.nr_placa, ma.ds_marca, mo.ds_modelo, a.ds_acessorio
+FROM Veiculo v, Marca ma, Modelo mo, Veiculo_Acessorio va, Acessorio a
+WHERE v.cd_modelo = mo.cd_modelo
+		AND mo.cd_marca = ma.cd_marca
+		AND v.nr_placa = va.nr_placa
+		AND va.cd_acessorio = a.cd_acessorio
+		AND a.ds_acessorio LIKE 'direção hidr%'
+
+-- h) Listar dados completos dos veículos: placa, descrição da marca, descrição do modelo, descrição da cor, ano modelo, ano fabricação, quantidade 
+--    de km rodado, quantidade de portas, descrição dos acessórios e descrição do combustível que o move.
+SELECT v.nr_placa, ma.ds_marca, mo.ds_modelo, cr.ds_cor, v.nr_ano_mod, v.nr_ano_fab, v.qt_km_rodado, v.qt_portas, a.ds_acessorio, cm.ds_combustivel
+FROM Veiculo v, Marca ma, Modelo mo, Cor cr, Combustivel cm, Acessorio a, Veiculo_Acessorio va, veiculo_combustivel vc
+WHERE v.cd_modelo = mo.cd_modelo 
+		AND mo.cd_marca = ma.cd_marca
+		AND v.cd_cor = cr.cd_cor
+		AND v.nr_placa = va.nr_placa
+		AND va.cd_acessorio = a.cd_acessorio
+		AND v.nr_placa = vc.nr_placa
+		AND vc.cd_combustivel = cm.cd_combustivel
 		
-Desempilha:
-		pop ax
-		mov al, ah //move resto para al
-		add al, '0'
-		call MANDA_CARACTER
-		dec Contador_Pilha
-		cmp Contador_Pilha,0
-		jne Desempilha
-	}
-}
-
-void Print_MM_SS(void) {
-	Print_MM(MINUTOS);
-    Print_SS(SEGUNDOS);
-}
-
-unsigned char animationPosition = 0;
-void DisplayAnimation(void){
-    asm{
-		mov bl, animationPosition
-		mov al, ANIMATION_7_SEG[bx]
-		mov dx, IO0
-		out dx, al
-		inc animationPosition
-		cmp animationPosition, 5
-		jg RESETCOUNT
-		jmp BREAK
-		RESETCOUNT:
-		mov animationPosition, 0
-	BREAK:
-	}
-}
-
-unsigned char SenhaDigitada[4]; //1234 ou 4321
-unsigned char SenhaTecnico[6]; //Libera
-int TecnicoSenhaPosition = 0;
-int SenhaPosition = 0;
-int WaitOutput = 0;
-int TempSegundos = 0;
-int Lock = 0;
-int Unlock = 0;
-int Erro = 0;
-int TotalErro = 0;
-
-void main(void) {
-	
-	asm call INICIALIZA_8251
-	asm call INICIALIZA_8259
-
-	//NMI
-    set_int(0x02, (void *)&nmi_handler); 
-    set_int(0x70, (void *)&int0_handler); 
-    set_int(0x71, (void *)&int1_handler); 
-    set_int(0x72, (void *)&int2_handler); 
-    set_int(0x73, (void *)&int3_handler); 
-    set_int(0x74, (void *)&int4_handler); 
-    set_int(0x75, (void *)&int5_handler); 
-    set_int(0x76, (void *)&int6_handler); 
-    set_int(0x77, (void *)&int7_handler); 
-
-	asm STI
-    
-    //PROGRAMA DA SENHA
-    while(1){
-		asm mov bx, offset Terminal_Mens
-		asm call Print_String
-		asm call Pula_Linha
-      
-    while(reset == 0) {
-		if(TempSegundos != SEGUNDOS){
-			if(WaitOutput != 1) {
-			   asm call DisplayAnimation
-			}
-			TempSegundos = SEGUNDOS;
-			WaitOutput = 0;
-		} else if(KeyPressed == 1) {
-			if(SenhaPosition < 4) {
-				asm{
-					mov al, Tecla
-					mov bx, SenhaPosition
-					mov SenhaDigitada[bx], al
-					sub al, '0'
-					mov bl, al
-					mov bh, 0
-					mov al, TABELA_7_SEG[BX]
-					call DisplayAnimation
-					mov dx, IO0
-					out dx, al
-					mov KeyPressed, 0
-					mov WaitOutput, 1
-					inc SenhaPosition
-				}
-			}
-		} else if(SenhaPosition >= 4) {
-			asm {
-				mov bx, 0
-				cmp SenhaDigitada[bx], '1'
-				jne NOTLOCK
-				mov bx, 1
-				cmp SenhaDigitada[bx], '2'
-				jne NOTLOCK
-				mov bx, 2
-				cmp SenhaDigitada[bx], '3'
-				jne NOTLOCK
-				mov bx, 3
-				cmp SenhaDigitada[bx], '4'
-				jne NOTLOCK
-				je ISLOCK
-				NOTLOCK:
-				inc Erro
-				mov bx, 0
-				cmp SenhaDigitada[bx], '4'
-				jne NOTUNLOCK
-				mov bx, 1
-				cmp SenhaDigitada[bx], '3'
-				jne NOTUNLOCK
-				mov bx, 2
-				cmp SenhaDigitada[bx], '2'
-				jne NOTUNLOCK
-				mov bx, 3
-				cmp SenhaDigitada[bx], '1'
-				jne NOTUNLOCK
-				je ISUNLOCK
-				NOTUNLOCK:
-				inc Erro
-				jmp ENDCHECKING
-				ISLOCK:
-				inc Lock
-				jmp ENDCHECKING
-				ISUNLOCK:
-				inc Unlock
-				jmp ENDCHECKING
-				ENDCHECKING:
-			}
-			if(Erro == 2){
-				asm{
-					mov bx, 2
-					mov al, RESPONSE_7_SEG[bx]
-					mov dx, IO0
-					out dx, al
-					inc TotalErro
-					mov Erro, 0
-				}
-			} else if(Lock == 1){
-				asm{
-					mov bx, 0
-					mov al, RESPONSE_7_SEG[bx]
-					mov dx, IO0
-					out dx, al
-					mov Lock, 0
-					mov Erro, 0
-				}
-			} else if(Unlock == 1){
-				asm{
-					mov bx, 1
-					mov al, RESPONSE_7_SEG[bx]
-					mov dx, IO0
-					out dx, al
-					mov Unlock, 0
-					mov Erro, 0
-				}
-			}
-			
-			asm mov WaitOutput, 1
-			asm mov SenhaPosition, 0
-		}
 		
-		if(TotalErro >= 3){
-			asm{
-				mov bx, 3
-				mov al, RESPONSE_7_SEG[bx]
-				mov dx, IO0
-				out dx, al
-				mov bx, offset Terminal_Mens2
-				call Print_String
-				call Pula_Linha
-				LOCKSYSTEM:
-				cmp Ha_Tecla_Digitada,1
-				jne DONTPRINT
-				mov al, Tecla
-				mov bx, TecnicoSenhaPosition
-				mov SenhaTecnico[bx], al
-				call MANDA_CARACTER
-				mov Ha_Tecla_Digitada,0
-				inc TecnicoSenhaPosition
-				cmp TecnicoSenhaPosition, 6
-				je CHECKPASSWORD
-				jmp LOCKSYSTEM
-
-DONTPRINT:
-				jmp LOCKSYSTEM
-			 
-CHECKPASSWORD:
-				mov bx, 0
-				cmp SenhaTecnico[bx], 'L'
-				jne NOTPASSWORD
-				mov bx, 1
-				cmp SenhaTecnico[bx], 'I'
-				jne NOTPASSWORD
-				mov bx, 2
-				cmp SenhaTecnico[bx], 'B'
-				jne NOTPASSWORD
-				mov bx, 3
-				cmp SenhaTecnico[bx], 'E'
-				jne NOTPASSWORD
-				mov bx, 4
-				cmp SenhaTecnico[bx], 'R'
-				jne NOTPASSWORD
-				mov bx, 5
-				cmp SenhaTecnico[bx], 'A'
-				jne NOTPASSWORD
-				je UNLOCKSYSTEM
-			 
-NOTPASSWORD:
-				mov TecnicoSenhaPosition, 0
-				call Pula_Linha
-				jmp LOCKSYSTEM
-		  
-UNLOCKSYSTEM:
-				mov TecnicoSenhaPosition, 0
-				mov TotalErro, 0
-				call Pula_Linha
-				mov Lock, 0
-				mov Unlock, 0
-				mov Erro, 0
-				mov bx, 0
-			}
-		}
-    }
-}
-      
-while(1) {
-	asm {
-		cmp Ha_Tecla_Digitada,1
-		jne Nao_Imprime
-		mov al, Tecla
-		call MANDA_CARACTER
-		mov Ha_Tecla_Digitada,0
 		
-Nao_Imprime:
-
-	}
-}
-	
-while(1) {
-	Entrada:	
-		asm mov bx, offset Tab_Mens1
-		asm call Print_String
-		asm call Pula_Linha
-		asm call Le_Byte_Modo_II
-		asm call Pula_Linha
-		asm cmp Result, 25
-		asm jg Entrada	
 		
-		for(unsigned char i = 1; i <= 10; i++) {
-			asm {
-				mov bx, offset Tab_Mens2
-				call Print_String
-				mov  al, Result
-				call Print_Int
-				mov bx, offset Tab_Mens3
-				call Print_String
-				mov al, i
-				call Print_Int
-				mov bx, offset Tab_Mens4
-				call Print_String
-				mov cl, i //pega multiplicador
-				mov al, Result
-				mul cl
-				call Print_Int
-				call Pula_Linha
-			}
-		}
-	}
 
-	while(1) {
-		asm {
-		
-LEITURA_0_9:
-			CALL RECEBER_CARACTER
-			cmp al, '0'
-			jl LEITURA_0_9
-			cmp al, '9'
-			jg LEITURA_0_9
-			cmp al, '0'
-			je  IMPRIMIR_ZERO
-			cmp al, '1'
-			je  IMPRIMIR_UM
-			cmp al, '2'
-			je  IMPRIMIR_DOIS
-			cmp al, '3'
-			je  IMPRIMIR_TRES
-			cmp al, '4'
-			je  IMPRIMIR_QUATRO
-			cmp al, '5'
-			je  IMPRIMIR_CINCO
-			cmp al, '6'
-			je  IMPRIMIR_SEIS
-			cmp al, '7'
-			je  IMPRIMIR_SETE
-			cmp al, '8'
-			je  IMPRIMIR_OITO
-			cmp al, '9'
-			je  IMPRIMIR_NOVE
-			jmp LEITURA_0_9
-			
-IMPRIMIR_ZERO:
-			MOV BX, OFFSET ZERO
-			call Print_String
-			call Pula_Linha
-			jmp BREAKS
-			
-IMPRIMIR_UM:
-			MOV BX, OFFSET UM
-			call Print_String
-			call Pula_Linha
-			jmp BREAKS
-			
-IMPRIMIR_DOIS:
-			MOV BX, OFFSET DOIS
-			call Print_String
-			call Pula_Linha
-			jmp BREAKS
-			
-IMPRIMIR_TRES:
-			MOV BX, OFFSET TRES
-			call Print_String
-			call Pula_Linha
-			jmp BREAKS
-			
-IMPRIMIR_QUATRO:
-			MOV BX, OFFSET QUATRO
-			call Print_String
-			call Pula_Linha
-			jmp BREAKS
-			
-IMPRIMIR_CINCO:
-			MOV BX, OFFSET CINCO
-			call Print_String
-			call Pula_Linha
-			jmp BREAKS
-			
-IMPRIMIR_SEIS:
-			MOV BX, OFFSET SEIS
-			call Print_String
-			call Pula_Linha
-			jmp BREAKS
-			
-IMPRIMIR_SETE:
-			MOV BX, OFFSET SETE
-			call Print_String
-			call Pula_Linha
-			jmp BREAKS
-			
-IMPRIMIR_OITO:
-			MOV BX, OFFSET OITO
-			call Print_String
-			call Pula_Linha
-			jmp BREAKS
-			call Print_String
-			call Pula_Linha
-			jmp BREAKS
-			
-IMPRIMIR_NOVE:
-			MOV BX, OFFSET NOVE
-			call Print_String
-			call Pula_Linha
-			jmp BREAKS
-			
-BREAKS:
-		}
-	}
+-- a)     Listar a média de km rodados entre os veículos cadastrados;
 
+SELECT AVG(v.qt_km_rodado)
+FROM Veiculo v
 
-	while (1) {
-		asm {
-			call Le_Tecla 
-			mov al, Tecla
-			mov Digito_1, al
-			sub al, '0'
-			mov bl, al
-			mov bh, 0
-			mov al, TABELA_7_SEG[BX]
-			mov dx, IO0
-			out dx, al
-			
-OPERACAO:
-			call Le_Tecla
-			mov al, Tecla
-			cmp al, '+'
-			je SOMA
-			cmp al, '/'
-			je DIVISAO
-			cmp al, '*'
-			je MULTIPLICACAO
-			cmp al, '-'
-			je SUBTRACAO 
-			jmp OPERACAO
-				
-SOMA:
-			call Le_Tecla
-			mov  al, Tecla
-			mov  Digito_2,al
-			sub al,'0'
-			mov bl, al
-			mov bh, 0
-			mov al, TABELA_7_SEG[BX]
-			mov dx, IO0
-			out dx, al
-			//Digito_1 + Digito_2
-			
-AGUARDA_IGUAL:
-			call Le_Tecla
-			mov al, Tecla
-			cmp al, '='
-			jne AGUARDA_IGUAL
-			sub Digito_1, '0' //converte de ASCII
-			sub Digito_2, '0' //para byte
-			mov al, Digito_1
-			add al, Digito_2
-			mov bl, al
-			mov bh, 0
-			mov al, TABELA_7_SEG[BX]
-			mov dx, IO0
-			out dx, al
-			jmp BREAK
-					
-MULTIPLICACAO:
-SUBTRACAO:
-			call Le_Tecla
-			mov  al, Tecla
-			mov  Digito_2,al
-			sub al, '0'
-			mov bl, al
-			mov bh, 0
-			mov al, TABELA_7_SEG[BX]
-			mov dx, IO0
-			out dx, al
+-- b)     Listar o ano de fabricação do(s) veículo(s) mais novo e ano de fabricação do(s) veículo(s) mais antigo cadastrado na base de dados;
 
-AGUARDA_IGUAL_SUB:
-			call Le_Tecla
-			mov al, Tecla
-			cmp al, '='
-			jne AGUARDA_IGUAL_SUB
-			sub Digito_1, '0' //converte de ASCII
-			sub Digito_2, '0' //para byte
-			mov al, Digito_1
-			sub al, Digito_2
-			mov bl, al
-			mov bh, 0
-			mov al, TABELA_7_SEG[BX]
-			mov dx, IO0
-			out dx, al
-			jmp BREAK
-DIVISAO:
-			call Le_Tecla
-			mov  al, Tecla
-			mov  Digito_2,al
-			sub al, '0'
-			mov bl, al
-			mov bh, 0
-			mov al, TABELA_7_SEG[BX]
-			mov dx, IO0
-			out dx, al
-			//Digito_1 + Digito_2
-AGUARDA_IGUAL_DIV:
-			call Le_Tecla
-			mov al, Tecla
-			cmp al, '='
-			jne AGUARDA_IGUAL_DIV
-			sub Digito_1, '0' //converte de ASCII
-			sub Digito_2, '0' //para byte
-			mov al, Digito_1 //ax = Digito_1
-			mov ah, 0
-			mov cl, Digito_2
-			div cl
-			mov bl, al  //bx = al
-			mov bh, 0
-			mov al, TABELA_7_SEG[BX]
-			mov dx, IO0
-			out dx, al
-			jmp BREAK
-BREAK:		
-		}
-	}
-}
+SELECT MAX(v.nr_ano_fab), MIN(v.nr_ano_fab)
+FROM Veiculo v
 
-void Print_MM(int MM) {
-	asm {
-		mov ax, MM //17
-		mov bl, 10
-		div bl
-		//ah = 7 = resto //al = 1 = quociente
-		mov bl,al  //jogar al para...
-		mov bh,0 // ...bx
-		mov al, TABELA_7_SEG[bx]
-		mov dx, IO2  //DEZ MM
-		out dx, al
-		mov al, ah //move resto para al...
-		mov bl, al
-		mov bh, 0
-		mov al, TABELA_7_SEG[BX]
-		mov dx, IO3 //UNID MM
-		out dx, al
-	}
-}
- 
-void Print_SS(int SSS) {
-	asm {
-		mov ax, SSS //17
-		mov bl, 10
-		div bl
-		//ah = 7 = resto //al = 1 = quociente
-		mov bl,al  //jogar al para...
-		mov bh,0 // ...bx
-		mov al, TABELA_7_SEG[bx]
-		mov dx, IO4  //DEZ SS
-		out dx, al
-		mov al, ah //move resto para al...
-		mov bl, al
-		mov bh, 0
-		mov al, TABELA_7_SEG[BX]
-		mov dx, IO5 //UNID SS
-		out dx, al
-	}
-}
+-- c)     Listar o ano modelo do veículo com a respectiva quantidade de veículos correspondente ao ano listado;
 
-void Print_HH(int HH) {
-	asm {
-		mov ax, HH //17
-		mov bl, 10
-		div bl
-		//ah = 7 = resto //al = 1 = quociente
-		mov bl,al  //jogar al para...
-		mov bh,0 // ...bx
-		mov al, TABELA_7_SEG[bx]
-		mov dx, IO2  //DEZ HH
-		out dx, al
-		mov al, ah //move resto para al...
-		mov bl, al
-		mov bh, 0
-		mov al, TABELA_7_SEG[BX]
-		mov dx, IO3 //UNID HH
-		out dx, al
-	}
-}
+SELECT v.nr_ano_mod, COUNT(v.nr_ano_mod)
+FROM Veiculo v
+GROUP BY v.nr_ano_mod
+
+-- d)     Listar a descrição do combustível com a respectiva quantidade de veículos que apresentam o combustível, ordenando pelo maior número de veículos descendente;
+
+SELECT co.ds_combustivel, COUNT(vc.nr_placa)
+FROM veiculo v, combustivel co, Veiculo_Combustivel vc
+WHERE vc.cd_combustivel = co.cd_combustivel AND vc.nr_placa = v.nr_placa
+GROUP BY co.ds_combustivel
+ORDER BY COUNT(vc.nr_placa) DESC
+
+-- e)     Listar a descrição do modelo com a respectiva quantidade de veículo(s) correspondente ao modelo listado;
+
+SELECT m.ds_modelo, COUNT(v.nr_placa)
+FROM veiculo v, modelo m
+WHERE v.cd_modelo = m.cd_modelo
+GROUP BY v.nr_placa
+
+-- f)      Listar todas as marcas (descrição) disponíveis com o respetivo modelo (descrição), bem como a quantidade de veículo associada a marca e modelo listado;
+
+SELECT ma.ds_marca, mo.ds_modelo, COUNT(v.nr_placa)
+FROM veiculo v, marca ma, modelo mo
+WHERE v.cd_modelo = mo.cd_modelo AND mo.cd_marca = ma.cd_marca
+GROUP BY v.nr_placa
+
+-- g)     Listar a descrição do acessório com a respectiva quantidade de veículo que possuem o referido acessório listado.
+
+SELECT a.ds_acessorio, COUNT(v.nr_placa)
+FROM veiculo v, acessorio a, veiculo_acessorio va
+WHERE v.nr_placa = va.nr_placa AND a.cd_acessorio = va.cd_acessorio
+GROUP BY v.nr_placa
+
+-- h)     Listar o nome da localidade com a respectiva quantidade de proprietários vinculado(s) a cada localidade, restringindo ao estado de "SC";
+
+SELECT l.nm_localidade, COUNT(p.nm_proprietario)
+FROM Proprietario p, Localidade l
+WHERE p.cd_localidade = l.cd_localidade AND p.sg_uf = 'SC'
+GROUP BY p.nm_proprietario
+
+-- i)      Listar dados dos veículos: placa, descrição da marca, descrição do modelo e quantidade de acessórios associado a cada veículo listado, sendo que os veículos devem apresentar dois ou mais acessórios.
+
+SELECT v.nr_placa, ma.ds_marca, mo.ds_modelo, COUNT(a.cd_acessorio)
+FROM Veiculo v, acessorio a, marca ma, modelo mo, veiculo_acessorio va
+WHERE v.cd_modelo = mo.cd_modelo AND ma.cd_marca = mo.cd_marca AND v.nr_placa = va.nr_placa AND a.cd_acessorio = va.cd_acessorio
+GROUP BY a.cd_acessorio
+HAVING COUNT(a.cd_acessorio) >= 2
+
+-- j)     Listar dados dos veículos: placa, descrição da marca, descrição do modelo e quantidade de combustíveis associados a cada veículo listado.
+
+SELECT v.nr_placa, ma.ds_marca, mo.ds_modelo, COUNT(c.cd_combustivel)
+FROM Veiculo v, combustivel c, marca ma, modelo mo, veiculo_combustivel vc
+WHERE v.cd_modelo = mo.cd_modelo AND ma.cd_marca = mo.cd_marca AND v.nr_placa = vc.nr_placa AND c.cd_combustivel = vc.cd_combustivel
+GROUP BY c.cd_combustivel
